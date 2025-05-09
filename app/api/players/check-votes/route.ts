@@ -111,10 +111,36 @@ export async function POST(request: Request) {
     // Count votes for each player
     const voteResults: { [playerId: string]: number } = {};
     
+    // Create a mapping of who voted for whom
+    const voterMap: { [targetPlayerId: string]: { id: string, name: string }[] } = {};
+
+    // Create player name lookup map
+    const playerMap = players.reduce((map, player) => {
+      map[player.id] = player.name;
+      return map;
+    }, {} as Record<string, string>);
+
+    // Initialize vote results and voter map for all players
+    players.forEach(player => {
+      voteResults[player.id] = 0;
+      voterMap[player.id] = [];
+    });
+
     if (votes && votes.length > 0) {
-      votes.forEach((vote: { voted_for_id: string }) => {
+      votes.forEach((vote: { voted_for_id: string, voter_id: string }) => {
         const votedForId = vote.voted_for_id;
+        const voterId = vote.voter_id;
+        
+        // Increment vote count
         voteResults[votedForId] = (voteResults[votedForId] || 0) + 1;
+        
+        // Add to voter map
+        if (playerMap[voterId]) {
+          voterMap[votedForId].push({
+            id: voterId,
+            name: playerMap[voterId]
+          });
+        }
       });
       
       console.log('Vote results:', voteResults);
@@ -202,6 +228,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       voteResults,
+      voterMap,
       allVoted,
       majorityReached,
       majorityPlayerId,
@@ -263,12 +290,39 @@ async function getResultsData(roomId: string, round: number, adminClient: any) {
       console.error('Error fetching imposter for results:', imposterError);
     }
     
+    // Create player name lookup map
+    const playerMap = players.reduce((map, player) => {
+      map[player.id] = player.name;
+      return map;
+    }, {} as Record<string, string>);
+    
     // Count votes
     const voteResults: { [playerId: string]: number } = {};
+    
+    // Create a mapping of who voted for whom
+    const voterMap: { [targetPlayerId: string]: { id: string, name: string }[] } = {};
+    
+    // Initialize vote results and voter map for all players
+    players.forEach(player => {
+      voteResults[player.id] = 0;
+      voterMap[player.id] = [];
+    });
+    
     if (votes && votes.length > 0) {
-      votes.forEach((vote: { voted_for_id: string }) => {
+      votes.forEach((vote: { voter_id: string, voted_for_id: string }) => {
         const votedForId = vote.voted_for_id;
+        const voterId = vote.voter_id;
+        
+        // Increment vote count
         voteResults[votedForId] = (voteResults[votedForId] || 0) + 1;
+        
+        // Add to voter map
+        if (playerMap[voterId]) {
+          voterMap[votedForId].push({
+            id: voterId,
+            name: playerMap[voterId]
+          });
+        }
       });
     }
     
@@ -292,6 +346,7 @@ async function getResultsData(roomId: string, round: number, adminClient: any) {
     
     return {
       voteResults,
+      voterMap,
       allVoted: players && votes && players.length === votes.length,
       majorityReached,
       majorityPlayerId: majorityReached ? highestVotedPlayerId : null,

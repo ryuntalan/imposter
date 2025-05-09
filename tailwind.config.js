@@ -6,7 +6,14 @@ module.exports = {
     './components/**/*.{js,ts,jsx,tsx}',
   ],
   theme: {
-    extend: {},
+    extend: {
+      fontFamily: {
+        heading: ['Manrope', 'sans-serif'],
+      },
+      colors: {
+        primary: '#5865F2',
+      },
+    },
   },
   plugins: [],
 } 

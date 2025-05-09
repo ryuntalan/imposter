@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { getRoomById, getPlayerById } from '@/lib/rooms';
+import { createClient } from '@supabase/supabase-js';
 
 // Create a new votes table to store player votes
 interface Vote {
@@ -12,6 +13,13 @@ interface Vote {
   created_at: string;
 }
 
+interface Player {
+  id: string;
+  name: string;
+  room_id: string;
+  is_imposter: boolean;
+}
+
 // POST /api/players/vote - Submit a player's vote for the imposter
 export async function POST(request: Request) {
   // Ensure response is always JSON
@@ -20,99 +28,65 @@ export async function POST(request: Request) {
   };
 
   try {
-    // Parse request body with error handling
-    let body;
-    try {
-      body = await request.json();
-    } catch (error) {
-      console.error('Error parsing request body:', error);
-      return NextResponse.json({
-        success: false,
-        error: 'Invalid JSON in request body'
-      }, { status: 400, headers });
-    }
-
-    console.log('Vote API received request body:', body);
-
-    const { playerId, votedPlayerId, roomId, round } = body;
+    const body = await request.json();
+    const { playerId, roomId, votedPlayerId, round } = body;
     
-    if (!playerId || !votedPlayerId || !roomId) {
-      console.error('Missing required fields:', { playerId, votedPlayerId, roomId });
+    if (!playerId || !roomId || !votedPlayerId) {
       return NextResponse.json({
         success: false,
-        error: 'Player ID, Voted Player ID, and Room ID are required'
+        error: 'Missing required fields'
       }, { status: 400, headers });
     }
     
-    // Validate the voter exists and belongs to the room
-    const voter = await getPlayerById(playerId);
-    if (!voter) {
-      console.error('Voter not found:', playerId);
-      return NextResponse.json({
-        success: false,
-        error: 'Player not found'
-      }, { status: 404, headers });
-    }
+    console.log('Received vote:', { playerId, roomId, votedPlayerId, round });
     
-    console.log('Found voter:', { id: voter.id, name: voter.name, roomId: voter.room_id });
+    // Initialize Supabase client
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+    );
     
-    if (voter.room_id !== roomId) {
-      console.error('Voter does not belong to room:', { 
-        voterId: voter.id, 
-        voterRoomId: voter.room_id, 
-        requestRoomId: roomId 
-      });
-      return NextResponse.json({
-        success: false,
-        error: 'Player does not belong to this room'
-      }, { status: 403, headers });
-    }
-    
-    // Validate the voted-for player exists and belongs to the room
-    const votedFor = await getPlayerById(votedPlayerId);
-    if (!votedFor) {
-      console.error('Voted player not found:', votedPlayerId);
-      return NextResponse.json({
-        success: false,
-        error: 'Voted player not found'
-      }, { status: 404, headers });
-    }
-    
-    console.log('Found voted player:', { id: votedFor.id, name: votedFor.name, roomId: votedFor.room_id });
-    
-    if (votedFor.room_id !== roomId) {
-      console.error('Voted player does not belong to room:', { 
-        votedPlayerId: votedFor.id, 
-        votedPlayerRoomId: votedFor.room_id, 
-        requestRoomId: roomId 
-      });
-      return NextResponse.json({
-        success: false,
-        error: 'Voted player does not belong to this room'
-      }, { status: 403, headers });
-    }
-    
-    // Get the room to check the current round
-    const room = await getRoomById(roomId);
-    if (!room) {
-      return NextResponse.json({
-        success: false,
-        error: 'Room not found'
-      }, { status: 404, headers });
-    }
-    
-    // Try to access votes table first to check if it exists
-    let votesTableExists = false;
-    
+    // Check if the room exists
+    let room;
     try {
-      const { data, error } = await supabase.from('votes').select('count(*)').limit(1);
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('id, round_number')
+        .eq('id', roomId)
+        .single();
+        
+      if (error) {
+        console.error('Error fetching room:', error);
+        return NextResponse.json({
+          success: false,
+          error: `Room not found: ${error.message}`
+        }, { status: 404, headers });
+      }
       
-      if (!error) {
-        // Table exists
-        votesTableExists = true;
+      room = data;
+    } catch (e) {
+      console.error('Unexpected error fetching room:', e);
+      return NextResponse.json({
+        success: false,
+        error: 'Failed to fetch room: ' + (e instanceof Error ? e.message : String(e))
+      }, { status: 500, headers });
+    }
+    
+    // Ensure the votes table exists
+    let votesTableExists = true;
+    try {
+      const { error } = await supabase
+        .from('votes')
+        .select('id')
+        .limit(1);
+        
+      if (error && error.code === '42P01') { // Table does not exist
+        votesTableExists = false;
       }
     } catch (e) {
-      console.log('Votes table may not exist, will try to create it');
+      console.error('Error checking votes table:', e);
+      // Continue and try to create the table
+      votesTableExists = false;
     }
     
     // If votes table doesn't exist, create it
@@ -160,14 +134,7 @@ export async function POST(request: Request) {
       }
     }
     
-    if (!votesTableExists) {
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to access or create votes table'
-      }, { status: 500, headers });
-    }
-    
-    // Check if player already submitted a vote for this round
+    // Check if player has already voted and update if so
     let existingVote;
     try {
       const { data, error } = await supabase
@@ -195,6 +162,9 @@ export async function POST(request: Request) {
       }, { status: 500, headers });
     }
     
+    // Store vote ID for response
+    let voteId;
+    
     if (existingVote) {
       // Update the existing vote
       try {
@@ -210,6 +180,8 @@ export async function POST(request: Request) {
             error: `Failed to update vote: ${updateError.message}`
           }, { status: 500, headers });
         }
+        
+        voteId = existingVote.id;
       } catch (e) {
         console.error('Unexpected error updating vote:', e);
         return NextResponse.json({
@@ -217,95 +189,52 @@ export async function POST(request: Request) {
           error: 'Failed to update vote: ' + (e instanceof Error ? e.message : String(e))
         }, { status: 500, headers });
       }
-      
-      // Get updated vote results after the update
-      let votes;
+    } else {
+      // Insert a new vote
       try {
-        const { data, error: votesError } = await supabase
+        const { data, error: insertError } = await supabase
           .from('votes')
-          .select('voted_for_id')
-          .eq('room_id', roomId)
-          .eq('round', room.round_number);
+          .insert([{
+            voter_id: playerId,
+            voted_for_id: votedPlayerId,
+            room_id: roomId,
+            round: room.round_number
+          }])
+          .select()
+          .single();
           
-        if (votesError) {
-          console.error('Error fetching votes after update:', votesError);
+        if (insertError) {
+          console.error('Error inserting vote:', insertError);
           return NextResponse.json({
-            success: false, 
-            error: `Failed to fetch updated votes: ${votesError.message}`
+            success: false,
+            error: `Failed to submit vote: ${insertError.message}`
           }, { status: 500, headers });
         }
         
-        votes = data || [];
-      } catch (e) {
-        console.error('Unexpected error fetching votes:', e);
-        return NextResponse.json({
-          success: false,
-          error: 'Failed to fetch updated votes: ' + (e instanceof Error ? e.message : String(e))
-        }, { status: 500, headers });
-      }
-      
-      // Calculate vote counts
-      const voteResults: { [playerId: string]: number } = {};
-      if (votes && votes.length > 0) {
-        votes.forEach(vote => {
-          const votedForId = vote.voted_for_id;
-          voteResults[votedForId] = (voteResults[votedForId] || 0) + 1;
-        });
-      }
-      
-      return NextResponse.json({
-        success: true,
-        message: 'Vote updated successfully',
-        voteId: existingVote.id,
-        voteResults
-      }, { headers });
-    }
-    
-    // Insert a new vote
-    let newVote;
-    try {
-      const { data, error: insertError } = await supabase
-        .from('votes')
-        .insert([{
-          voter_id: playerId,
-          voted_for_id: votedPlayerId,
-          room_id: roomId,
-          round: room.round_number
-        }])
-        .select()
-        .single();
+        if (!data) {
+          console.error('No vote data returned after insert');
+          return NextResponse.json({
+            success: false,
+            error: 'Failed to submit vote: No data returned'
+          }, { status: 500, headers });
+        }
         
-      if (insertError) {
-        console.error('Error inserting vote:', insertError);
+        voteId = data.id;
+      } catch (e) {
+        console.error('Unexpected error inserting vote:', e);
         return NextResponse.json({
           success: false,
-          error: `Failed to submit vote: ${insertError.message}`
+          error: 'Failed to submit vote: ' + (e instanceof Error ? e.message : String(e))
         }, { status: 500, headers });
       }
-      
-      if (!data) {
-        console.error('No vote data returned after insert');
-        return NextResponse.json({
-          success: false,
-          error: 'Failed to submit vote: No data returned'
-        }, { status: 500, headers });
-      }
-      
-      newVote = data;
-    } catch (e) {
-      console.error('Unexpected error inserting vote:', e);
-      return NextResponse.json({
-        success: false,
-        error: 'Failed to submit vote: ' + (e instanceof Error ? e.message : String(e))
-      }, { status: 500, headers });
     }
     
-    // Check if all players have submitted votes
+    // Get all players with names
     let players;
     try {
       const { data, error: playersError } = await supabase
         .from('players')
-        .select('id')
+        .select('id, name')
         .eq('room_id', roomId);
         
       if (playersError) {
@@ -325,11 +254,12 @@ export async function POST(request: Request) {
       }, { status: 500, headers });
     }
     
+    // Get all votes with voter and voted_for ids
     let votes;
     try {
       const { data, error: votesError } = await supabase
         .from('votes')
-        .select('voted_for_id')
+        .select('id, voter_id, voted_for_id')
         .eq('room_id', roomId)
         .eq('round', room.round_number);
         
@@ -350,62 +280,92 @@ export async function POST(request: Request) {
       }, { status: 500, headers });
     }
     
-    const allVoted = players && votes && players.length === votes.length;
+    // Check if all players have voted
+    const allVoted = players.length > 0 && votes.length === players.length;
+    
+    // Create player name lookup
+    const playerMap = players.reduce((map, player) => {
+      map[player.id] = player.name;
+      return map;
+    }, {} as Record<string, string>);
     
     // Count votes for each player
     const voteResults: { [playerId: string]: number } = {};
     
+    // Create a mapping of who voted for whom
+    const voterMap: { [targetPlayerId: string]: { id: string, name: string }[] } = {};
+    
+    // Initialize results and voter map with all players
+    players.forEach(player => {
+      voteResults[player.id] = 0;
+      voterMap[player.id] = [];
+    });
+    
+    // Process all votes
     if (votes && votes.length > 0) {
       votes.forEach(vote => {
         const votedForId = vote.voted_for_id;
+        const voterId = vote.voter_id;
+        
+        // Increment vote count
         voteResults[votedForId] = (voteResults[votedForId] || 0) + 1;
+        
+        // Add to voter map if we have the player's name
+        if (playerMap[voterId]) {
+          voterMap[votedForId] = voterMap[votedForId] || [];
+          voterMap[votedForId].push({
+            id: voterId,
+            name: playerMap[voterId]
+          });
+        }
       });
-      
-      // Check if any player has a majority of votes
-      const totalPlayers = players?.length || 0;
-      const majorityThreshold = Math.floor(totalPlayers / 2) + 1;
-      
-      let majorityReached = false;
-      let majorityPlayerId = null;
-      
-      for (const [playerId, voteCount] of Object.entries(voteResults)) {
-        if (voteCount >= majorityThreshold) {
-          majorityReached = true;
-          majorityPlayerId = playerId;
-          break;
-        }
+    }
+    
+    // Check if any player has a majority of votes
+    const totalPlayers = players.length;
+    const majorityThreshold = Math.floor(totalPlayers / 2) + 1;
+    
+    let majorityReached = false;
+    let majorityPlayerId = null;
+    
+    for (const [playerId, voteCount] of Object.entries(voteResults)) {
+      if (voteCount >= majorityThreshold) {
+        majorityReached = true;
+        majorityPlayerId = playerId;
+        break;
       }
-      
-      // If majority reached or all have voted, get the imposter
-      if (majorityReached || allVoted) {
-        // Get the imposter
-        try {
-          const { data: imposter, error: imposterError } = await supabase
-            .from('players')
-            .select('id, name')
-            .eq('room_id', roomId)
-            .eq('is_imposter', true)
-            .single();
-            
-          if (imposterError) {
-            console.error('Error fetching imposter:', imposterError);
-            // Don't return an error - we can still provide the voting results
-          }
+    }
+    
+    // If majority reached or all have voted, get the imposter
+    if (majorityReached || allVoted) {
+      // Get the imposter
+      try {
+        const { data: imposter, error: imposterError } = await supabase
+          .from('players')
+          .select('id, name')
+          .eq('room_id', roomId)
+          .eq('is_imposter', true)
+          .single();
           
-          return NextResponse.json({
-            success: true,
-            message: 'Vote submitted successfully',
-            voteId: newVote.id,
-            allVoted,
-            majorityReached,
-            majorityPlayerId,
-            voteResults,
-            imposter: imposter || null
-          }, { headers });
-        } catch (e) {
-          console.error('Unexpected error fetching imposter:', e);
-          // Continue without imposter data
+        if (imposterError) {
+          console.error('Error fetching imposter:', imposterError);
+          // Don't return an error - we can still provide the voting results
         }
+        
+        return NextResponse.json({
+          success: true,
+          message: 'Vote submitted successfully',
+          voteId,
+          allVoted,
+          majorityReached,
+          majorityPlayerId,
+          voteResults,
+          voterMap,
+          imposter: imposter || null
+        }, { headers });
+      } catch (e) {
+        console.error('Unexpected error fetching imposter:', e);
+        // Continue without imposter data
       }
     }
     
@@ -413,10 +373,11 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       message: 'Vote submitted successfully',
-      voteId: newVote.id,
-      allVoted: false,
+      voteId,
+      allVoted,
       majorityReached: false,
-      voteResults
+      voteResults,
+      voterMap
     }, { headers });
     
   } catch (error: any) {

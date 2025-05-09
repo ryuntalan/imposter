@@ -167,6 +167,29 @@ export async function POST(request: Request) {
             }
           }
         }
+        
+        // Update the game state to discussion_voting after all answers are submitted
+        const { data: gameState, error: gameStateError } = await supabaseAdmin
+          .from('game_states')
+          .upsert({
+            room_id: roomData.id,
+            round: roomData.round_number,
+            current_stage: 'discussion_voting',
+            updated_at: new Date().toISOString()
+          })
+          .select();
+          
+        if (gameStateError) {
+          console.error('Error updating game state:', gameStateError);
+          if (results.submitAnswers) {
+            results.submitAnswers.gameStateUpdateError = gameStateError.message;
+          }
+        } else {
+          if (results.submitAnswers) {
+            results.submitAnswers.gameStateUpdated = true;
+            results.submitAnswers.gameState = gameState;
+          }
+        }
       } catch (error) {
         console.error('Error submitting answers:', error);
         results.submitAnswers = { 

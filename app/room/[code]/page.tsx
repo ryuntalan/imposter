@@ -20,6 +20,7 @@ export default function GameRoom({ params }: { params: { code: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [startingGame, setStartingGame] = useState(false);
   const [gameStarted, setGameStarted] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
   const router = useRouter();
   const { currentPlayer } = useGameState();
 
@@ -167,6 +168,12 @@ export default function GameRoom({ params }: { params: { code: string } }) {
   // Copy room code to clipboard
   const copyRoomCode = () => {
     navigator.clipboard.writeText(code);
+    setCodeCopied(true);
+    
+    // Reset the copied state after 2 seconds
+    setTimeout(() => {
+      setCodeCopied(false);
+    }, 2000);
   };
   
   // Start the game
@@ -293,9 +300,9 @@ export default function GameRoom({ params }: { params: { code: string } }) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-100">
-        <div className="text-center">
-          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary-600 border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
+      <div className="flex min-h-screen items-center justify-center bg-primary">
+        <div className="text-center p-8 bg-white rounded-xl">
+          <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-primary border-r-transparent align-[-0.125em] motion-reduce:animate-[spin_1.5s_linear_infinite]"></div>
           <p className="mt-2 text-gray-600">Loading game room...</p>
         </div>
       </div>
@@ -304,13 +311,15 @@ export default function GameRoom({ params }: { params: { code: string } }) {
 
   if (error || !room) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center p-4 bg-gray-100">
-        <div className="max-w-md w-full p-8 bg-white rounded-xl shadow-lg text-center">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-primary p-4">
+        <div className="flex-grow flex flex-col justify-center items-center w-full space-y-6 p-4 sm:p-6 md:p-8 bg-white rounded-xl m-5 sm:m-10 md:m-20 lg:m-20 
+                      max-h-[calc(100vh-40px)] sm:max-h-[calc(100vh-80px)] md:max-h-[calc(100vh-160px)]
+                      max-w-[calc(100vw-40px)] sm:max-w-[calc(100vw-80px)] md:max-w-[calc(100vw-160px)]">
           <h1 className="text-2xl font-bold text-red-600 mb-2">Error</h1>
           <p className="text-gray-600 mb-6">{error || 'Game room not found'}</p>
           <Link
             href="/"
-            className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+            className="inline-flex justify-center py-2 px-4 border border-primary rounded-md text-sm font-medium text-primary bg-white hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
           >
             Back to Home
           </Link>
@@ -323,65 +332,56 @@ export default function GameRoom({ params }: { params: { code: string } }) {
   const isHost = players.length > 0 && players[0].id === playerId;
 
   return (
-    <div className="flex min-h-screen flex-col bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">Impostor Game</h1>
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-gray-500">Room Code:</span>
-            <button 
-              onClick={copyRoomCode}
-              className="bg-gray-200 px-3 py-1 rounded-md text-gray-800 font-mono font-bold hover:bg-gray-300"
-              title="Click to copy"
-            >
-              {code}
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* Main content */}
-      <main className="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {gameStarted ? (
-          <GameView 
-            room={room as GameRoomType} 
-            players={players} 
-            currentPlayer={currentPlayer}
-            isHost={isHost}
-          />
-        ) : (
-          <>
-            <div className="bg-white shadow rounded-lg p-6 mb-6">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
-                  Game Status:{' '}
-                  <span className="text-primary-500">
-                    Waiting for players ({players.length})
-                  </span>
-                </h2>
-                {isHost && (
-                  <button
-                    onClick={handleStartGame}
-                    disabled={startingGame || players.length < 2}
-                    className="px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-500 hover:bg-primary-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 disabled:bg-gray-400 disabled:cursor-not-allowed"
+    <div className="flex min-h-screen flex-col bg-primary">
+      {/* Contained layout */}
+      <div className="flex flex-col flex-grow h-full w-full max-w-[calc(100vw-40px)] sm:max-w-[calc(100vw-80px)] md:max-w-[calc(100vw-160px)]
+                    max-h-[calc(100vh-40px)] sm:max-h-[calc(100vh-80px)] md:max-h-[calc(100vh-160px)]
+                    m-5 sm:m-10 md:m-20 lg:m-20 bg-white rounded-xl overflow-hidden">
+        {/* Header */}
+        <header className="p-4 sm:p-6 flex flex-col items-center">
+          {!gameStarted && (
+            <>
+              <h1 className="text-2xl sm:text-6xl font-medium text-black font-heading m-8">Lobby</h1>
+              <div className="flex flex-col items-center">
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-medium text-gray-500">Room Code:</span>
+                  <button 
+                    onClick={copyRoomCode}
+                    className="bg-gray-100 px-3 py-1 rounded-md text-primary font-mono font-bold hover:bg-gray-200"
+                    title="Click to copy"
                   >
-                    {startingGame ? 'Starting...' : 'Start Game'}
+                    {code}
                   </button>
+                </div>
+                {codeCopied && (
+                  <span className="text-xs text-green-600 mt-1">Code copied to clipboard!</span>
                 )}
               </div>
+            </>
+          )}
+        </header>
 
-              <div>
-                <h3 className="text-lg font-medium text-gray-900 mb-4">Players ({players.length})</h3>
+        {/* Main content */}
+        <main className="flex-grow p-4 sm:p-6 overflow-y-auto">
+          {gameStarted ? (
+            <GameView 
+              room={room as GameRoomType} 
+              players={players} 
+              currentPlayer={currentPlayer}
+              isHost={isHost}
+            />
+          ) : (
+            <div className="flex flex-col items-center">
+              <div className="bg-gray-50 rounded-lg p-4 sm:p-6 mb-6 w-full max-w-2xl">
                 {players.length === 0 ? (
-                  <p className="text-gray-500">No players have joined yet.</p>
+                  <p className="text-gray-500 text-center">No players have joined yet.</p>
                 ) : (
-                  <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <ul className="grid grid-cols-2 gap-3">
                     {players.map((player) => (
                       <li 
                         key={player.id}
-                        className={`flex items-center px-4 py-3 rounded-md shadow-sm ${
-                          player.id === playerId ? 'bg-primary-50 border border-primary-200' : 'bg-gray-50'
+                        className={`flex items-center px-4 py-3 rounded-md ${
+                          player.id === playerId ? 'bg-primary/10' : 'bg-white'
                         }`}
                       >
                         <div className="flex-1">
@@ -393,7 +393,7 @@ export default function GameRoom({ params }: { params: { code: string } }) {
                               </span>
                             )}
                             {players[0].id === player.id && (
-                              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary-100 text-primary-800">
+                              <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-primary/20 text-black">
                                 Host
                               </span>
                             )}
@@ -404,20 +404,30 @@ export default function GameRoom({ params }: { params: { code: string } }) {
                   </ul>
                 )}
               </div>
-            </div>
 
-            <div className="text-center text-gray-500">
-              {players.length < 2 ? (
-                <p>You need at least 2 players to start. Share the room code with your friends to invite them!</p>
-              ) : isHost ? (
-                <p>You can start the game when ready!</p>
-              ) : (
-                <p>Waiting for the host to start the game...</p>
+              {isHost && (
+                <button
+                  onClick={handleStartGame}
+                  disabled={startingGame || players.length < 2}
+                  className="px-16 py-4 border border-transparent text-base font-medium rounded-md text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary disabled:bg-primary/50 disabled:cursor-not-allowed mb-6"
+                >
+                  {startingGame ? 'Starting...' : 'Start Game'}
+                </button>
               )}
+
+              <div className="text-center text-gray-500">
+                {players.length < 2 ? (
+                  <p>You need at least 2 players to start. Share the room code with your friends to invite them!</p>
+                ) : isHost ? (
+                  <p>You can start the game when ready!</p>
+                ) : (
+                  <p>Waiting for the host to start the game...</p>
+                )}
+              </div>
             </div>
-          </>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
     </div>
   );
 } 

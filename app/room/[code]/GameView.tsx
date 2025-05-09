@@ -16,6 +16,15 @@ interface PlayerAnswer {
   answer: string;
 }
 
+interface Voter {
+  id: string;
+  name: string;
+}
+
+interface VoterMap {
+  [targetPlayerId: string]: Voter[];
+}
+
 export default function GameView({ room, players, currentPlayer, isHost }: GameViewProps) {
   const [prompt, setPrompt] = useState<string | null>(null);
   const [promptId, setPromptId] = useState<string | null>(null);
@@ -30,9 +39,10 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
   const [allAnswers, setAllAnswers] = useState<PlayerAnswer[]>([]);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [voteSubmitted, setVoteSubmitted] = useState(false);
-  const [voteResults, setVoteResults] = useState<{[playerId: string]: number}>({});
+  const [voteResults, setVoteResults] = useState<Record<string, number>>({});
+  const [voterMap, setVoterMap] = useState<VoterMap>({});
   const [majorityReached, setMajorityReached] = useState(false);
-  const [imposterRevealed, setImposterRevealed] = useState<Player | null>(null);
+  const [imposterRevealed, setImposterRevealed] = useState<{ id: string, name: string } | null>(null);
   const [checkingVotesInterval, setCheckingVotesInterval] = useState<NodeJS.Timeout | null>(null);
   const [gameStateChannel, setGameStateChannel] = useState<RealtimeChannel | null>(null);
   
@@ -546,6 +556,11 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
         // Update the UI with the current vote counts
         setVoteResults(data.voteResults);
         
+        // Update voter map
+        if (data.voterMap) {
+          setVoterMap(data.voterMap);
+        }
+        
         // Debug output for vote counting
         const totalPlayers = players.length;
         const majorityThreshold = Math.floor(totalPlayers / 2) + 1;
@@ -591,12 +606,11 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
   };
   
   // Submit vote for who the player thinks is the impostor
-  const handleSubmitVote = async () => {
-    if (!currentPlayer || !room || !selectedPlayer) {
+  const handleSubmitVote = async (playerId: string) => {
+    if (!currentPlayer || !room) {
       console.error('Cannot submit vote:', { 
         currentPlayer: currentPlayer ? 'exists' : 'missing', 
         room: room ? 'exists' : 'missing',
-        selectedPlayer: selectedPlayer ? 'exists' : 'missing'
       });
       return;
     }
@@ -604,13 +618,14 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
     try {
       setSubmitting(true);
       setError(null);
+      setSelectedPlayer(playerId);
       
       console.log('Submitting vote:', {
         playerId: currentPlayer.id,
         playerName: currentPlayer.name,
         roomId: room.id,
-        votedPlayerId: selectedPlayer,
-        votedPlayerName: players.find(p => p.id === selectedPlayer)?.name,
+        votedPlayerId: playerId,
+        votedPlayerName: players.find(p => p.id === playerId)?.name,
         round: room.round_number,
         isHost: isHost
       });
@@ -623,7 +638,7 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
         body: JSON.stringify({
           playerId: currentPlayer.id,
           roomId: room.id,
-          votedPlayerId: selectedPlayer,
+          votedPlayerId: playerId,
           round: room.round_number
         })
       });
@@ -652,6 +667,11 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
       // Update the vote results display
       if (data.voteResults) {
         setVoteResults(data.voteResults);
+      }
+      
+      // Update voter mapping
+      if (data.voterMap) {
+        setVoterMap(data.voterMap);
       }
       
       // Run the check for majority votes immediately after submitting
@@ -806,6 +826,129 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
     );
   }
   
+  // Answer submission section update for answering stage
+  if (gameStage === 'answering' as GameStage) {
+    return (
+      <div className="flex flex-col items-center w-full">
+        <h1 className="text-2xl sm:text-4xl font-medium text-black font-heading mb-8">Answer Phase</h1>
+        
+        {role === 'imposter' && (
+          <p className="text-red-600 font-regular mb-6">You are the Impostor!</p>
+        )}
+        
+        <div className="w-full max-w-lg mb-6">
+          <p className="text-xl text-black text-center mb-6">{prompt}</p>
+          
+          {!submitted ? (
+            <div className="space-y-4">
+              <textarea
+                value={answerText}
+                onChange={(e) => setAnswerText(e.target.value)}
+                placeholder="Type your answer here..."
+                className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-primary focus:border-primary text-black resize-none"
+                rows={3}
+                disabled={submitting}
+              ></textarea>
+              
+              <div className="flex justify-center">
+                <button
+                  onClick={handleSubmitAnswer}
+                  disabled={submitting || !answerText.trim()}
+                  className={`px-16 py-4 rounded-md text-white ${
+                    submitting || !answerText.trim() 
+                      ? 'bg-gray-400 cursor-not-allowed' 
+                      : 'bg-primary hover:bg-primary/90'
+                  }`}
+                >
+                  {submitting ? 'Submitting...' : 'Submit Answer'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-green-50 border border-green-200 rounded-md p-4">
+              <p className="text-green-800 font-medium text-center">Your answer has been submitted!</p>
+              <p className="mt-2 text-green-600 text-center">Waiting for other players to submit their answers...</p>
+              <div className="mt-4 p-3 bg-white rounded border border-gray-100">
+                <p className="text-black">{answerText}</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // Create a separate return for the discussion_voting stage (similar to answering stage)
+  if (gameStage === 'discussion_voting' as GameStage) {
+    return (
+      <div className="flex flex-col items-center w-full">
+        <h1 className="text-2xl sm:text-4xl font-medium text-black font-heading mb-8">Voting Phase</h1>
+        
+        {role === 'imposter' ? (
+          <p className="text-red-600 font-regular mb-6">Tap on a player to vote and deflect suspicion</p>
+        ) : (
+          <p className="text-black font-regular mb-6">Tap on who you think is the Impostor to vote</p>
+        )}
+        
+        {/* Players and answers in clickable cards */}
+        <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {allAnswers.map((answer) => {
+            const isOwnCard = answer.player_id === currentPlayer?.id;
+            const isSelected = answer.player_id === selectedPlayer;
+            const votesForThisPlayer = voteResults[answer.player_id] || 0;
+            const votersForThisPlayer = voterMap[answer.player_id] || [];
+            
+            // Check if current player voted for this player
+            const hasCurrentPlayerVotedForThis = selectedPlayer === answer.player_id;
+            
+            return (
+              <button
+                key={answer.player_id}
+                onClick={() => !isOwnCard && !submitting && handleSubmitVote(answer.player_id)}
+                disabled={isOwnCard || submitting}
+                className={`relative text-left p-4 rounded-md transition text-center ${
+                  isOwnCard 
+                    ? 'bg-gray-100 cursor-not-allowed' 
+                    : isSelected
+                      ? 'bg-white border-2 border-primary'
+                      : 'bg-white border border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                <h3 className="font-medium text-gray-900 mb-2">
+                  {answer.player_name}
+                </h3>
+                <p className="text-black text-2xl">{answer.answer}</p>
+                
+                {/* Vote indicators */}
+                {votesForThisPlayer > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    {/* Show who voted for this player */}
+                    {votersForThisPlayer.length > 0 && (
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {votersForThisPlayer.map(voter => (
+                          <span 
+                            key={voter.id} 
+                            className={`px-2 py-1 text-xs rounded-full ${
+                              voter.id === currentPlayer?.id 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {voter.id === currentPlayer?.id ? 'You' : voter.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  
   return (
     <div className="space-y-6">
       {/* Hidden div for debug logging */}
@@ -826,73 +969,38 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
           return null;
         })()}
       </div>
-      {/* Prompt Card */}
-      <div className="p-6 bg-white rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Prompt</h2>
-        <div className={`p-4 rounded-md ${role === 'imposter' ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
-          <p className="text-gray-800 font-medium">{prompt}</p>
-          
-          {role === 'imposter' && (
-            <div className="mt-4">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                You are the Impostor!
-              </span>
-              <p className="mt-2 text-sm text-red-600">
-                Try to blend in! Your prompt is different from everyone else's.
-              </p>
-            </div>
-          )}
-          
-          {role === 'regular' && (
-            <div className="mt-4">
-              <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                Regular Player
-              </span>
-              <p className="mt-2 text-sm text-green-600">
-                One player has a different prompt. Try to figure out who it is!
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
       
-      {/* Answer Submission Section - only show in answering stage */}
-      {gameStage === 'answering' && (
+      {/* Prompt Card - only shown in non-answering and non-voting and non-results stages */}
+      {gameStage !== ('answering' as GameStage) && 
+       gameStage !== ('discussion_voting' as GameStage) && 
+       gameStage !== ('results' as GameStage) && (
         <div className="p-6 bg-white rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Answer</h2>
-          
-          {!submitted ? (
-            <div className="space-y-4">
-              <textarea
-                value={answerText}
-                onChange={(e) => setAnswerText(e.target.value)}
-                placeholder="Type your answer here..."
-                className="w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"
-                rows={4}
-                disabled={submitting}
-              ></textarea>
-              
-              <button
-                onClick={handleSubmitAnswer}
-                disabled={submitting || !answerText.trim()}
-                className={`px-4 py-2 rounded-md text-white ${
-                  submitting || !answerText.trim() 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : 'bg-primary-500 hover:bg-primary-600'
-                }`}
-              >
-                {submitting ? 'Submitting...' : 'Submit Answer'}
-              </button>
-            </div>
-          ) : (
-            <div className="bg-green-50 border border-green-200 rounded-md p-4">
-              <p className="text-green-800 font-medium">Your answer has been submitted!</p>
-              <p className="mt-2 text-green-600">Waiting for other players to submit their answers...</p>
-              <div className="mt-4 p-3 bg-white rounded border border-gray-100">
-                <p className="text-gray-800">{answerText}</p>
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Your Prompt</h2>
+          <div className={`p-4 rounded-md ${role === 'imposter' ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'}`}>
+            <p className="text-gray-800 font-medium">{prompt}</p>
+            
+            {role === 'imposter' && (
+              <div className="mt-4">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                  You are the Impostor!
+                </span>
+                <p className="mt-2 text-sm text-red-600">
+                  Try to blend in! Your prompt is different from everyone else's.
+                </p>
               </div>
-            </div>
-          )}
+            )}
+            
+            {role === 'regular' && (
+              <div className="mt-4">
+                <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  Regular Player
+                </span>
+                <p className="mt-2 text-sm text-green-600">
+                  One player has a different prompt. Try to figure out who it is!
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
       
@@ -924,221 +1032,127 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
         </div>
       )}
       
-      {/* Combined Discussion & Voting Section */}
-      {gameStage === 'discussion_voting' && (
+      {/* Players List - only shown in non-voting and non-results stages */}
+      {gameStage !== ('discussion_voting' as GameStage) && 
+       gameStage !== ('results' as GameStage) && (
         <div className="p-6 bg-white rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Discussion & Voting</h2>
-          
-          <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-            <p className="text-yellow-800">
-              Discuss with the group and vote for who you think is the impostor. Voting will continue until a majority agrees on one player.
-            </p>
-          </div>
-          
-          {allAnswers.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
-              {allAnswers.map((answer) => (
-                <div key={answer.player_id} className="bg-white border rounded-md p-4 shadow-sm">
-                  <h3 className="font-medium text-gray-800">{answer.player_name}</h3>
-                  <p className="mt-2 text-gray-600">{answer.answer}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="mb-8 p-4 bg-gray-50 rounded-md text-center">
-              <p className="text-gray-600">Loading answers...</p>
-              <button 
-                onClick={fetchAllAnswers} 
-                className="mt-2 px-4 py-1 bg-primary-600 text-white text-sm rounded hover:bg-primary-700"
+          <h2 className="text-xl font-semibold text-gray-900 mb-4">Players ({players.length})</h2>
+          <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {players.map((player) => (
+              <li 
+                key={player.id}
+                className={`flex items-center px-4 py-3 rounded-md shadow-sm ${
+                  player.id === currentPlayer?.id ? 'bg-primary-50 border border-primary-200' : 'bg-gray-50'
+                }`}
               >
-                Reload Answers
-              </button>
-            </div>
-          )}
-          
-          {!voteSubmitted ? (
-            <div className="mt-8">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Vote for the Impostor</h3>
-              <p className="text-gray-600 mb-4">
-                Select the player you think is the impostor:
-              </p>
-              
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 mb-6">
-                {players.map((player) => (
-                  player.id !== currentPlayer?.id && (
-                    <button
-                      key={player.id}
-                      onClick={() => setSelectedPlayer(player.id)}
-                      className={`text-left px-4 py-3 rounded-md ${
-                        selectedPlayer === player.id 
-                          ? 'bg-indigo-100 border-2 border-indigo-500' 
-                          : 'bg-gray-50 hover:bg-gray-100'
-                      }`}
-                    >
-                      <p className="font-medium text-gray-900">{player.name}</p>
-                    </button>
-                  )
-                ))}
-              </div>
-              
-              <div className="flex justify-end">
-                <button
-                  onClick={handleSubmitVote}
-                  disabled={!selectedPlayer}
-                  className={`px-4 py-2 rounded-md text-white ${
-                    !selectedPlayer 
-                      ? 'bg-gray-400 cursor-not-allowed' 
-                      : 'bg-primary-500 hover:bg-primary-600'
-                  }`}
-                >
-                  Submit Vote
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="mt-8">
-              <div className="bg-green-50 border border-green-200 rounded-md p-4 mb-6">
-                <p className="text-green-800 font-medium">Your vote has been submitted!</p>
-                <p className="mt-2 text-green-600">You can change your vote until a majority is reached.</p>
-                <button
-                  onClick={handleChangeVote}
-                  className="mt-4 px-4 py-2 bg-primary-500 text-white rounded-md hover:bg-primary-600"
-                >
-                  Change Vote
-                </button>
-              </div>
-              
-              {Object.keys(voteResults).length > 0 && (
-                <div className="bg-white border rounded-md p-4">
-                  <h3 className="font-medium text-gray-800 mb-2">Current Vote Count:</h3>
-                  <ul className="space-y-2">
-                    {Object.entries(voteResults).map(([playerId, votes]) => {
-                      const player = players.find(p => p.id === playerId);
-                      return (
-                        <li key={playerId} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                          <span>{player?.name || 'Unknown Player'}</span>
-                          <span className="px-2 py-1 bg-primary-100 text-primary-800 rounded-full text-sm">
-                            {votes} vote{votes !== 1 ? 's' : ''}
-                          </span>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                <div className="flex-1">
+                  <p className="font-medium text-gray-900">
+                    {player.name}
+                    {player.id === currentPlayer?.id && (
+                      <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        You
+                      </span>
+                    )}
+                  </p>
                 </div>
-              )}
-            </div>
-          )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      
+      {/* Game Instructions - only shown in non-voting and non-results stages */}
+      {gameStage !== ('discussion_voting' as GameStage) && 
+       gameStage !== ('results' as GameStage) && (
+        <div className="bg-primary-50 border-l-4 border-primary-500 p-4">
+          <p className="text-primary-700">Round {room.round_number}</p>
+          <p className="text-primary-700 mt-2">
+            {gameStage === 'answering' && "Answer the prompt you were given. After everyone submits, you'll review all answers."}
+            {gameStage === 'reveal' && "All answers are in! Review them carefully before discussion starts."}
+            {gameStage === 'discussion_voting' && "Discuss with the group and vote for who you think is the impostor. Voting continues until a majority is reached."}
+            {gameStage === 'results' && "The round is complete! A majority has decided, check who won."}
+          </p>
         </div>
       )}
       
       {/* Results Section */}
       {gameStage === 'results' && (
-        <div className="p-6 bg-white rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4">Voting Results</h2>
-          
-          <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6">
-            <p className="text-yellow-800">
-              A majority has been reached! The results are in.
-            </p>
-          </div>
+        <div className="flex flex-col items-center w-full">
+          <h1 className="text-2xl sm:text-4xl font-medium text-black font-heading mb-8">
+            {imposterRevealed && Object.entries(voteResults).find(([playerId, votes]) => 
+              playerId === imposterRevealed.id && votes >= Math.floor(players.length / 2) + 1) 
+              ? "Majority Wins!" 
+              : "Imposter Wins!"}
+          </h1>
           
           {imposterRevealed && (
-            <div className={`p-4 rounded-md mb-6 ${
-              imposterRevealed.id === selectedPlayer 
-                ? 'bg-green-50 border border-green-200' 
-                : 'bg-red-50 border border-red-200'
-            }`}>
-              <p className="font-medium">
-                {imposterRevealed.id === selectedPlayer
-                  ? `Correct! ${imposterRevealed.name} was the impostor.`
-                  : `Wrong! ${imposterRevealed.name} was the impostor.`}
-              </p>
-            </div>
+            <p className="text-black font-regular mb-6">
+              {imposterRevealed.name} was the Imposter
+            </p>
           )}
           
-          <div className="space-y-4">
-            <h3 className="font-medium text-gray-800">Final Vote Count:</h3>
-            <ul className="space-y-2">
-              {Object.entries(voteResults).map(([playerId, votes]) => {
-                const player = players.find(p => p.id === playerId);
-                const isImposter = imposterRevealed?.id === playerId;
-                return (
-                  <li 
-                    key={playerId} 
-                    className={`flex justify-between items-center p-2 rounded ${
-                      isImposter ? 'bg-red-50 border border-red-200' : 'bg-gray-50'
-                    }`}
-                  >
-                    <span>
-                      {player?.name || 'Unknown Player'}
-                      {isImposter && (
-                        <span className="ml-2 text-xs text-red-600 font-medium">(Impostor)</span>
-                      )}
-                    </span>
-                    <span className="px-2 py-1 bg-indigo-100 text-indigo-800 rounded-full text-sm">
-                      {votes} vote{votes !== 1 ? 's' : ''}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
+          {/* Player cards with answers and votes */}
+          <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            {allAnswers.map((answer) => {
+              const isImposter = imposterRevealed?.id === answer.player_id;
+              const votersForThisPlayer = voterMap[answer.player_id] || [];
+              
+              return (
+                <div
+                  key={answer.player_id}
+                  className={`relative p-4 rounded-md text-center ${
+                    isImposter 
+                      ? 'bg-red-50 border border-red-200' 
+                      : 'bg-green-50 border border-green-200'
+                  }`}
+                >
+                  <h3 className="font-medium text-gray-900 mb-2">
+                    {answer.player_name}
+                    {isImposter && (
+                      <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        Impostor
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-black text-2xl">{answer.answer}</p>
+                  
+                  {/* Show who voted for this player */}
+                  {votersForThisPlayer.length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-gray-200">
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {votersForThisPlayer.map(voter => (
+                          <span 
+                            key={voter.id} 
+                            className={`px-2 py-1 text-xs rounded-full ${
+                              voter.id === currentPlayer?.id 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-gray-100 text-gray-700'
+                            }`}
+                          >
+                            {voter.id === currentPlayer?.id ? 'You' : voter.name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
           
-          <div className="mt-8">
-            <p className="text-gray-600">
-              The game is now complete. The host can start a new round if desired.
-            </p>
-            
-            {/* Start New Round button - only visible to host */}
-            {isHost && (
+          {isHost && (
+            <div className="mt-4">
               <button
                 onClick={startNewRound}
                 disabled={loading}
-                className="mt-4 px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:bg-gray-400"
+                className="px-4 py-2 bg-primary text-white rounded-md hover:bg-primary/90 disabled:bg-gray-300"
               >
-                {loading ? 'Starting New Round...' : 'Start New Round'}
+                {loading ? 'Starting...' : 'Start New Round'}
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
-      
-      {/* Players List */}
-      <div className="p-6 bg-white rounded-lg shadow-md">
-        <h2 className="text-xl font-semibold text-gray-900 mb-4">Players ({players.length})</h2>
-        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {players.map((player) => (
-            <li 
-              key={player.id}
-              className={`flex items-center px-4 py-3 rounded-md shadow-sm ${
-                player.id === currentPlayer?.id ? 'bg-primary-50 border border-primary-200' : 'bg-gray-50'
-              }`}
-            >
-              <div className="flex-1">
-                <p className="font-medium text-gray-900">
-                  {player.name}
-                  {player.id === currentPlayer?.id && (
-                    <span className="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      You
-                    </span>
-                  )}
-                </p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-      
-      {/* Game Instructions */}
-      <div className="bg-primary-50 border-l-4 border-primary-500 p-4">
-        <p className="text-primary-700">Round {room.round_number}</p>
-        <p className="text-primary-700 mt-2">
-          {gameStage === 'answering' && "Answer the prompt you were given. After everyone submits, you'll review all answers."}
-          {gameStage === 'reveal' && "All answers are in! Review them carefully before discussion starts."}
-          {gameStage === 'discussion_voting' && "Discuss with the group and vote for who you think is the impostor. Voting continues until a majority is reached."}
-          {gameStage === 'results' && "The round is complete! A majority has decided, check who won."}
-        </p>
-      </div>
     </div>
   );
 } 
