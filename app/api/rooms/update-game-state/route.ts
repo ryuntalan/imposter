@@ -131,31 +131,56 @@ export async function POST(request: Request) {
     
     // Update the game state for this room and round
     try {
-      // Check if there's already a game state for this room and round
-      const { data: existingState, error: findError } = await adminClient
+      // Check for existing game state records, handling potential duplicates
+      const { data: existingStates, error: findError } = await adminClient
         .from('game_state')
-        .select('id')
+        .select('id, last_updated')
         .eq('room_id', roomId)
         .eq('round', room.round_number)
-        .maybeSingle();
+        .order('last_updated', { ascending: false }); // Most recent first
       
       if (findError) {
         console.error('Error finding existing game state:', findError);
         throw findError;
       }
       
+      // Check if we have duplicate records
+      if (existingStates && existingStates.length > 1) {
+        console.warn(`Found ${existingStates.length} duplicate game state records for room ${roomId}, round ${room.round_number}. Will clean up.`);
+        
+        // Keep the most recent record and delete the rest
+        const mostRecentId = existingStates[0].id;
+        const idsToDelete = existingStates.slice(1).map(state => state.id);
+        
+        if (idsToDelete.length > 0) {
+          console.log(`Cleaning up ${idsToDelete.length} duplicate game state records`);
+          
+          const { error: deleteError } = await adminClient
+            .from('game_state')
+            .delete()
+            .in('id', idsToDelete);
+            
+          if (deleteError) {
+            console.error('Error deleting duplicate game states:', deleteError);
+            // Continue with the update despite the error
+          }
+        }
+      }
+      
       let result;
       
-      if (existingState) {
-        // Update existing record
-        console.log(`Updating existing game state record for room ${roomId}, round ${room.round_number}`);
+      if (existingStates && existingStates.length > 0) {
+        // Update existing record (using the most recent one if there were duplicates)
+        const recordId = existingStates[0].id;
+        console.log(`Updating existing game state record (id: ${recordId}) for room ${roomId}, round ${room.round_number}`);
+        
         result = await adminClient
           .from('game_state')
           .update({
             current_stage: gameStage,
             last_updated: new Date().toISOString()
           })
-          .eq('id', existingState.id);
+          .eq('id', recordId);
       } else {
         // Insert new record
         console.log(`Creating new game state record for room ${roomId}, round ${room.round_number}`);

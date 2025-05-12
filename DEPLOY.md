@@ -50,9 +50,33 @@ If you encounter network errors or connection problems after deployment, follow 
    - This means the Supabase URL or API keys are not properly set or are using placeholder values
    - Double-check the values in your Vercel project settings and ensure they match your Supabase project
 
-3. **Request timeouts**
+3. **"Failed to update game state: JSON object requested, multiple (or no) rows returned"**
+   - This error indicates duplicate records in your game state table
+   - Enable debug endpoints by setting `ENABLE_DEBUG_ENDPOINTS=true` in your environment variables
+   - Visit `/api/debug/clean-game-state-duplicates` to automatically clean up the duplicates
+   - Visit `/api/debug/setup-game-state-table` to ensure your table has the proper constraints
+
+4. **Request timeouts**
    - The application is configured with a 20-second timeout for API requests
    - If you consistently experience timeouts, check if your Supabase project is experiencing high load or needs to be upgraded to a higher tier
+
+### Debug Endpoints
+
+The application includes several debug endpoints to help diagnose and fix issues:
+
+1. **Supabase Connection Test**: `/api/debug/supabase-test`
+   - Tests both client and server-side connections to Supabase
+   - Provides detailed diagnostic information about your configuration
+
+2. **Game State Table Setup**: `/api/debug/setup-game-state-table`
+   - Ensures the game_state table has the correct structure and constraints
+   - Helps fix issues with the game state table schema
+
+3. **Clean Game State Duplicates**: `/api/debug/clean-game-state-duplicates`
+   - Finds and removes duplicate game state records that can cause errors
+   - Keeps only the most recent record for each room/round combination
+
+To enable these endpoints in production, add `ENABLE_DEBUG_ENDPOINTS=true` to your environment variables in Vercel. Remember to disable them again after troubleshooting by removing this environment variable.
 
 ### Testing the Connection
 

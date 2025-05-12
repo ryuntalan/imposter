@@ -86,7 +86,62 @@ export async function GET() {
           CREATE INDEX IF NOT EXISTS idx_game_state_room_round ON game_state(room_id, round);
         `;
       } else {
-        // Constraint already exists, no action needed
+        // Check for and fix duplicate records
+        const duplicateCheckSql = `
+          SELECT room_id, round, COUNT(*) as count 
+          FROM game_state 
+          GROUP BY room_id, round 
+          HAVING COUNT(*) > 1
+        `;
+        
+        const { data: duplicateData, error: duplicateError } = await adminClient.rpc('system.sql', {
+          query: duplicateCheckSql
+        });
+        
+        if (duplicateError) {
+          console.error('Error checking for duplicates:', duplicateError);
+        } else if (Array.isArray(duplicateData) && duplicateData.length > 0) {
+          console.log(`Found ${duplicateData.length} room/round combinations with duplicate records`);
+          
+          // For each group of duplicates, keep the most recent and delete the rest
+          for (const duplicate of duplicateData) {
+            const { data: records, error: recordsError } = await adminClient
+              .from('game_state')
+              .select('id, last_updated')
+              .eq('room_id', duplicate.room_id)
+              .eq('round', duplicate.round)
+              .order('last_updated', { ascending: false });
+              
+            if (recordsError) {
+              console.error(`Error fetching duplicate records for room ${duplicate.room_id}, round ${duplicate.round}:`, recordsError);
+              continue;
+            }
+            
+            if (!records || records.length <= 1) continue;
+            
+            // Keep the first (most recent) record and delete others
+            const keepId = records[0].id;
+            const deleteIds = records.slice(1).map(r => r.id);
+            
+            const { error: deleteError } = await adminClient
+              .from('game_state')
+              .delete()
+              .in('id', deleteIds);
+              
+            if (deleteError) {
+              console.error(`Error deleting duplicate game states for room ${duplicate.room_id}:`, deleteError);
+            } else {
+              console.log(`Successfully cleaned up ${deleteIds.length} duplicate records for room ${duplicate.room_id}, round ${duplicate.round}`);
+            }
+          }
+          
+          return NextResponse.json({
+            success: true,
+            message: `Table has required constraint. Cleaned up duplicate records from ${duplicateData.length} room/round combinations.`
+          });
+        }
+        
+        // Constraint already exists and no duplicates (or couldn't fix them)
         return NextResponse.json({
           success: true,
           message: 'Table already has the required constraint'
