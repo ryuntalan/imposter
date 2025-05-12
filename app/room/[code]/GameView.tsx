@@ -440,16 +440,59 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
       
       if (!response.ok) {
         console.error('[GameView] Failed to update game state:', response.status);
-        const errorText = await response.text();
-        console.error('[GameView] Error response:', errorText);
+        
+        // Try to parse the error response as JSON
+        let errorData;
+        try {
+          errorData = await response.json();
+          console.error('[GameView] Error response:', errorData);
+        } catch (parseError) {
+          // If it's not JSON, get the text
+          const errorText = await response.text();
+          console.error('[GameView] Error response (text):', errorText);
+          errorData = { error: errorText };
+        }
+        
+        // Log error to console for debugging
+        console.error('[GameView] Game state update failed with error:', 
+          errorData.error || 'Unknown server error');
+        
         // Don't throw here - we don't want to break the flow if this fails
+        // But we may want to show a toast or notification to the user
+        return {
+          success: false,
+          error: errorData.error || `Server error: ${response.status}`
+        };
       } else {
         const data = await response.json();
         console.log('[GameView] Game state updated successfully:', data);
+        return { success: true, data };
       }
     } catch (err) {
-      console.error('[GameView] Error updating game state:', err);
+      // Handle network or other client-side errors
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      console.error('[GameView] Error updating game state:', errorMessage, err);
+      
+      // Try to log this error to the server for debugging in production
+      try {
+        await fetch('/api/debug/client-log', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            error: errorMessage, 
+            context: 'Update Game State',
+            room: room.id,
+            stage: newStage
+          }),
+        }).catch(e => console.error('Failed to log error:', e));
+      } catch (logErr) {
+        console.error('Error sending error log:', logErr);
+      }
+      
       // Don't throw here - we don't want to break the flow if this fails
+      return { success: false, error: errorMessage };
     }
   };
   

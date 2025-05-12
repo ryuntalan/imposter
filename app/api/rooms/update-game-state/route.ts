@@ -160,24 +160,93 @@ export async function POST(request: Request) {
       
     } catch (e) {
       console.error('Unexpected error updating game state:', e);
+      
+      // Properly extract error information
+      let errorMessage = 'Unknown error';
+      if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (typeof e === 'object' && e !== null) {
+        // Handle Supabase errors which have a specific structure
+        if ('message' in e) {
+          errorMessage = String(e.message);
+        } else if ('error' in e) {
+          errorMessage = String(e.error);
+        } else {
+          // Try to get a meaningful string representation
+          try {
+            errorMessage = JSON.stringify(e);
+          } catch {
+            errorMessage = 'Unserializable error object';
+          }
+        }
+      } else if (e !== undefined && e !== null) {
+        errorMessage = String(e);
+      }
+      
       return NextResponse.json({
         success: false,
-        error: 'Failed to update game state: ' + (e instanceof Error ? e.message : String(e))
+        error: 'Failed to update game state: ' + errorMessage
       }, { status: 500, headers });
     }
   } catch (error: any) {
     console.error('Error updating game state:', error);
+    
+    // Consistent error handling for the outer try-catch as well
+    let errorMessage = 'Unknown error';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'object' && error !== null && 'message' in error) {
+      errorMessage = String(error.message);
+    } else if (error !== undefined && error !== null) {
+      try {
+        errorMessage = JSON.stringify(error);
+      } catch {
+        errorMessage = String(error);
+      }
+    }
+    
     return NextResponse.json({
       success: false,
-      error: error.message || 'Unknown error'
+      error: errorMessage
     }, { status: 500, headers });
   }
 }
 
 // Helper function to create a Supabase admin client
 function createSupabaseAdminClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
-  );
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+  
+  // Validate environment variables
+  if (!supabaseUrl || supabaseUrl === 'https://example.supabase.co') {
+    console.error('[API] Supabase URL is missing or invalid');
+    throw new Error('Configuration error: NEXT_PUBLIC_SUPABASE_URL is not properly set');
+  }
+  
+  if (!supabaseServiceKey || supabaseServiceKey.includes('placeholder')) {
+    console.error('[API] Supabase service role key is missing or invalid');
+    throw new Error('Configuration error: SUPABASE_SERVICE_ROLE_KEY is not properly set');
+  }
+  
+  // Add debug logging in production
+  if (process.env.NODE_ENV === 'production' || process.env.DEBUG_SUPABASE === 'true') {
+    console.log(`[API] Creating admin client with URL: ${supabaseUrl.substring(0, 10)}...`);
+  }
+  
+  try {
+    return createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false
+      },
+      global: {
+        headers: {
+          'x-application-name': 'impostor-game-admin'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('[API] Failed to create Supabase admin client:', error);
+    throw new Error('Failed to initialize database connection. Please check your configuration.');
+  }
 } 

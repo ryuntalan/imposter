@@ -21,15 +21,20 @@ export function createServerSupabaseClient() {
     console.log(`[SERVER] Using service key: ${maskKey(supabaseServiceKey)}`);
   }
   
-  // In runtime, validate environment variables
-  if (process.env.NODE_ENV === 'production' && (!supabaseUrl || supabaseUrl === 'https://example.supabase.co' || !supabaseServiceKey || supabaseServiceKey.includes('placeholder'))) {
-    console.error('Supabase URL and service role key are required in production');
-    console.error('NEXT_PUBLIC_SUPABASE_URL is', supabaseUrl ? 'set' : 'not set');
-    console.error('SUPABASE_SERVICE_ROLE_KEY is', supabaseServiceKey ? 'set' : 'not set');
+  // Validate environment variables at runtime
+  if (process.env.NODE_ENV === 'production') {
+    // Check URL
+    if (!supabaseUrl || supabaseUrl === 'https://example.supabase.co') {
+      console.error('[SERVER] Supabase URL is missing or invalid');
+      throw new Error('Configuration error: NEXT_PUBLIC_SUPABASE_URL is not properly set. ' +
+                     'Check your environment variables in Vercel.');
+    }
     
-    // In production runtime, this will throw if the actual variables are missing
-    if (typeof window === 'undefined') {
-      throw new Error('Supabase URL and service role key are required');
+    // Check service role key
+    if (!supabaseServiceKey || supabaseServiceKey.includes('placeholder')) {
+      console.error('[SERVER] Supabase service role key is missing or invalid');
+      throw new Error('Configuration error: SUPABASE_SERVICE_ROLE_KEY is not properly set. ' +
+                     'This key is required for admin operations. Check your environment variables in Vercel.');
     }
   }
   
@@ -46,7 +51,17 @@ export function createServerSupabaseClient() {
       }
     });
   } catch (error) {
-    console.error('[SERVER] Error initializing Supabase client:', error);
-    throw error;
+    // Enhance error with additional context
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const enhancedError = new Error(
+      `[SERVER] Failed to initialize Supabase client: ${errorMessage}. ` +
+      `Check your Supabase configuration and network connectivity.`
+    );
+    
+    console.error(enhancedError);
+    console.error('[SERVER] Supabase URL used:', supabaseUrl.substring(0, 10) + '...');
+    console.error('[SERVER] Environment:', process.env.NODE_ENV);
+    
+    throw enhancedError;
   }
 } 
