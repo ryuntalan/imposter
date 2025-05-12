@@ -32,7 +32,7 @@ export default function Home() {
             <li>One player is secretly chosen to be the imposter.</li>
             <li>Everyone gets a question. The imposter gets a slightly different version.</li>
             <li>All players write a short answer to their question.</li>
-            <li>Answers are shown with each player's name.</li>
+            <li>Answers are shown with each player&apos;s name.</li>
             <li>Everyone discusses and votes on who they think the imposter is.</li>
             <li>If the group guesses correctly, they win. If not, the imposter wins.</li>
           </ol>

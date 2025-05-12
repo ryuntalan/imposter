@@ -985,7 +985,7 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
                   You are the Impostor!
                 </span>
                 <p className="mt-2 text-sm text-red-600">
-                  Try to blend in! Your prompt is different from everyone else's.
+                  Try to blend in! Your prompt is different from everyone else&apos;s.
                 </p>
               </div>
             )}
@@ -1067,7 +1067,7 @@ export default function GameView({ room, players, currentPlayer, isHost }: GameV
         <div className="bg-primary-50 border-l-4 border-primary-500 p-4">
           <p className="text-primary-700">Round {room.round_number}</p>
           <p className="text-primary-700 mt-2">
-            {gameStage === 'answering' && "Answer the prompt you were given. After everyone submits, you'll review all answers."}
+            {gameStage === 'answering' && "Answer the prompt you were given. After everyone submits, you&apos;ll review all answers."}
             {gameStage === 'reveal' && "All answers are in! Review them carefully before discussion starts."}
             {gameStage === 'discussion_voting' && "Discuss with the group and vote for who you think is the impostor. Voting continues until a majority is reached."}
             {gameStage === 'results' && "The round is complete! A majority has decided, check who won."}
