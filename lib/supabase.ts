@@ -52,7 +52,18 @@ export type Database = {
   };
 };
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Provide fallback values for environment variables during build
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MTM0MDcyMDAsImV4cCI6MTkyODk4MzIwMH0.placeholder';
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey); 
+export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+
+// Log warning if using fallback values
+if (process.env.NODE_ENV !== 'production') {
+  if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
+    console.warn('Warning: NEXT_PUBLIC_SUPABASE_URL is not set. Using fallback value for development.');
+  }
+  if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+    console.warn('Warning: NEXT_PUBLIC_SUPABASE_ANON_KEY is not set. Using fallback value for development.');
+  }
+} 

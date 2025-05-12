@@ -62,6 +62,25 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) in your browser.
 
+## Deployment
+
+### Vercel Deployment
+
+To deploy this project on Vercel, you need to configure environment variables:
+
+1. **Required Environment Variables**
+   - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`: Your Supabase anonymous key 
+   - `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key
+
+2. **Setting Up in Vercel**
+   - Go to your Vercel project dashboard
+   - Navigate to Settings > Environment Variables
+   - Add each variable with its corresponding value
+   - Save and redeploy
+
+See [DEPLOY.md](./DEPLOY.md) for detailed deployment instructions.
+
 ## Game Flow
 
 1. The host creates a new game room
