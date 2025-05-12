@@ -140,7 +140,10 @@ export function subscribeToGameState(
   round: number,
   callback: (gameState: GameState) => void
 ): RealtimeChannel {
-  // Initial fetch
+  const channelName = `game-state-${roomId}-${round}`;
+  console.log(`[realtime] Setting up game state subscription for ${channelName}`);
+  
+  // Initial fetch to make sure we have current state
   fetchGameState(roomId, round).then(gameState => {
     if (gameState) {
       if (DEBUG) console.log('[realtime] Initial game state:', gameState);
@@ -156,59 +159,94 @@ export function subscribeToGameState(
     window.gameStatePollInterval = undefined;
   }
 
-  // Subscribe to changes in game_state table
-  const channel = supabase
-    .channel(`game-state-${roomId}-${round}`)
-    .on(
-      'postgres_changes',
-      {
-        event: '*',
-        schema: 'public',
-        table: 'game_state',
-        filter: `room_id=eq.${roomId}`,
-      },
-      (payload: any) => {
-        if (DEBUG) console.log('[realtime] Game state change detected:', payload);
-        
-        // Extract the game state from the payload
-        const { new: newGameState, old: oldGameState } = payload;
-        
-        // If the payload contains valid game state and matches the current round
-        if (newGameState && newGameState.round === round) {
-          const gameState: GameState = {
-            id: newGameState.id,
-            room_id: newGameState.room_id,
-            round: newGameState.round,
-            current_stage: newGameState.current_stage as GameStage,
-            last_updated: newGameState.last_updated || new Date().toISOString()
-          };
+  let retryCount = 0;
+  const maxRetries = 3;
+  
+  function setupChannel() {
+    // Subscribe to changes in game_state table
+    return supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'game_state',
+          filter: `room_id=eq.${roomId}`,
+        },
+        (payload: any) => {
+          if (DEBUG) console.log('[realtime] Game state change detected:', payload);
           
-          if (DEBUG) {
-            console.log(`[realtime] Game state updated for room ${roomId}, round ${round}:`);
-            console.log(`[realtime] Stage: ${oldGameState?.current_stage || 'unknown'} -> ${gameState.current_stage}`);
+          // Extract the game state from the payload
+          const { new: newGameState, old: oldGameState } = payload;
+          
+          // If the payload contains valid game state and matches the current round
+          if (newGameState && newGameState.round === round) {
+            const gameState: GameState = {
+              id: newGameState.id,
+              room_id: newGameState.room_id,
+              round: newGameState.round,
+              current_stage: newGameState.current_stage as GameStage,
+              last_updated: newGameState.last_updated || new Date().toISOString()
+            };
             
-            // Log specifically when transitioning to discussion_voting stage
-            if (gameState.current_stage === 'discussion_voting' && oldGameState?.current_stage !== 'discussion_voting') {
-              console.log('[realtime] 🚨 IMPORTANT: Transitioning to discussion_voting stage');
+            if (DEBUG) {
+              console.log(`[realtime] Game state updated for room ${roomId}, round ${round}:`);
+              console.log(`[realtime] Stage: ${oldGameState?.current_stage || 'unknown'} -> ${gameState.current_stage}`);
+              
+              // Log specifically when transitioning to discussion_voting stage
+              if (gameState.current_stage === 'discussion_voting' && oldGameState?.current_stage !== 'discussion_voting') {
+                console.log('[realtime] 🚨 IMPORTANT: Transitioning to discussion_voting stage');
+              }
             }
+            
+            callback(gameState);
           }
-          
-          callback(gameState);
         }
-      }
-    )
-    .subscribe((status) => {
-      if (DEBUG) console.log(`[realtime] Game state subscription status: ${status}`);
-      
-      if (status !== 'SUBSCRIBED') {
-        console.warn(`[realtime] Game state subscription failed with status: ${status}`);
+      )
+      .subscribe((status) => {
+        if (DEBUG) console.log(`[realtime] Game state subscription status: ${status}`);
         
-        // If subscription fails, fall back to polling
-        console.log('[realtime] Falling back to polling for game state updates');
-        setupGameStatePolling(roomId, round, callback);
-      }
-    });
-
+        if (status === 'SUBSCRIBED') {
+          console.log('[realtime] Successfully subscribed to game state changes!');
+          // Reset retry count on successful subscription
+          retryCount = 0;
+        } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+          console.warn(`[realtime] Game state subscription failed with status: ${status}`);
+          
+          // Try to reconnect a few times before falling back to polling
+          if (retryCount < maxRetries) {
+            retryCount++;
+            console.log(`[realtime] Retrying subscription... (attempt ${retryCount}/${maxRetries})`);
+            
+            // Wait a bit before retrying
+            setTimeout(() => {
+              try {
+                // Attempt to reconnect
+                const newChannel = setupChannel();
+                // If no error thrown, update the channel reference
+                channel = newChannel;
+              } catch (err) {
+                console.error('[realtime] Error during retry:', err);
+                fallbackToPolling();
+              }
+            }, 2000 * retryCount); // Increasing backoff
+          } else {
+            console.log('[realtime] Max retries reached, falling back to polling');
+            fallbackToPolling();
+          }
+        }
+      });
+  }
+  
+  function fallbackToPolling() {
+    // If subscription fails after retries, fall back to polling
+    console.log('[realtime] Falling back to polling for game state updates');
+    setupGameStatePolling(roomId, round, callback);
+  }
+  
+  // Initialize the channel
+  let channel = setupChannel();
   return channel;
 }
 

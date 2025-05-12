@@ -131,20 +131,48 @@ export async function POST(request: Request) {
     
     // Update the game state for this room and round
     try {
-      // Use upsert to either insert or update as needed
-      const { data: gameStateData, error: gameStateError } = await adminClient
+      // Check if there's already a game state for this room and round
+      const { data: existingState, error: findError } = await adminClient
         .from('game_state')
-        .upsert({
-          room_id: roomId,
-          round: room.round_number,
-          current_stage: gameStage,
-          last_updated: new Date().toISOString()
-        }, {
-          onConflict: 'room_id, round'
-        });
+        .select('id')
+        .eq('room_id', roomId)
+        .eq('round', room.round_number)
+        .maybeSingle();
+      
+      if (findError) {
+        console.error('Error finding existing game state:', findError);
+        throw findError;
+      }
+      
+      let result;
+      
+      if (existingState) {
+        // Update existing record
+        console.log(`Updating existing game state record for room ${roomId}, round ${room.round_number}`);
+        result = await adminClient
+          .from('game_state')
+          .update({
+            current_stage: gameStage,
+            last_updated: new Date().toISOString()
+          })
+          .eq('id', existingState.id);
+      } else {
+        // Insert new record
+        console.log(`Creating new game state record for room ${roomId}, round ${room.round_number}`);
+        result = await adminClient
+          .from('game_state')
+          .insert({
+            room_id: roomId,
+            round: room.round_number,
+            current_stage: gameStage,
+            last_updated: new Date().toISOString()
+          });
+      }
+      
+      const { error: gameStateError } = result;
       
       if (gameStateError) {
-        console.error('Error upserting game state:', gameStateError);
+        console.error('Error updating/inserting game state:', gameStateError);
         throw gameStateError;
       }
       
@@ -157,7 +185,6 @@ export async function POST(request: Request) {
         round: room.round_number,
         gameStage
       }, { headers });
-      
     } catch (e) {
       console.error('Unexpected error updating game state:', e);
       
