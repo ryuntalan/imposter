@@ -56,7 +56,43 @@ export type Database = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://example.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2MTM0MDcyMDAsImV4cCI6MTkyODk4MzIwMH0.placeholder';
 
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey);
+// Add detailed logging for production environments
+const debugLogging = process.env.NODE_ENV === 'production' || process.env.DEBUG_SUPABASE === 'true';
+
+// Log Supabase URL for debugging (but mask most of the key)
+if (debugLogging) {
+  // Mask most of the key but show the beginning and end
+  const maskKey = (key: string) => {
+    if (!key || key.length < 8) return '(not set)';
+    return `${key.substring(0, 6)}...${key.substring(key.length - 4)}`;
+  };
+  
+  console.log(`[Supabase] Initializing with URL: ${supabaseUrl}`);
+  console.log(`[Supabase] Using anon key: ${maskKey(supabaseAnonKey)}`);
+  console.log(`[Supabase] Default environment: ${process.env.NODE_ENV}`);
+}
+
+// Create Supabase client with additional options
+export const supabase = createClient<Database>(
+  supabaseUrl, 
+  supabaseAnonKey,
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true
+    },
+    global: {
+      headers: {
+        'x-application-name': 'impostor-game'
+      }
+    }
+  }
+);
+
+// Add debug logging if needed
+if (debugLogging) {
+  console.log('[Supabase] Client initialized successfully');
+}
 
 // Log warning if using fallback values
 if (process.env.NODE_ENV !== 'production') {

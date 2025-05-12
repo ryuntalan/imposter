@@ -18,34 +18,66 @@ export default function CreateGame() {
     setError(null);
 
     try {
+      // Enhanced error tracking
+      console.log('Submitting create room request with host name:', hostName);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      
       const response = await fetch('/api/rooms', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ hostName }),
+        signal: controller.signal
       });
-
-      const data = await response.json();
+      
+      clearTimeout(timeoutId);
+      
+      // Check if the response is JSON
+      const contentType = response.headers.get('content-type');
+      const isJson = contentType && contentType.includes('application/json');
+      
+      let data;
+      let responseText;
+      
+      if (isJson) {
+        data = await response.json();
+        responseText = JSON.stringify(data);
+      } else {
+        responseText = await response.text();
+        console.error('Non-JSON response:', responseText);
+        data = { error: 'Unexpected response format from server' };
+      }
+      
+      console.log('Create room response:', response.status, response.ok ? 'OK' : 'Failed', 
+                  'Content-Type:', contentType, 'Data:', responseText.substring(0, 500));
 
       if (!response.ok) {
         // Log the error for debugging
         try {
-          await fetch('/api/debug/log-error', {
+          await fetch('/api/debug/client-log', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({ 
               error: data, 
-              context: 'Create Room Form' 
+              context: 'Create Room Form',
+              response: {
+                status: response.status,
+                statusText: response.statusText,
+                contentType,
+                responseText: responseText.substring(0, 1000)
+              }
             }),
           });
         } catch (logErr) {
           console.error('Error logging error:', logErr);
         }
         
-        throw new Error(data.error || 'Failed to create game');
+        throw new Error(data.error || `Server error: ${response.status} ${response.statusText}`);
       }
 
       // Update the current player in the game state
@@ -57,11 +89,37 @@ export default function CreateGame() {
         joined_at: new Date().toISOString()
       });
 
+      // Store player data in localStorage as a backup
+      try {
+        localStorage.setItem('player_data', JSON.stringify({
+          id: data.player.id,
+          name: data.player.name,
+          room_id: data.room.id,
+          is_imposter: false,
+          joined_at: new Date().toISOString()
+        }));
+      } catch (storageErr) {
+        console.warn('Failed to store player data in localStorage:', storageErr);
+      }
+
       // Redirect to the game room
       router.push(`/room/${data.room.code}`);
     } catch (err: any) {
       console.error('Error creating game:', err);
-      setError(err.message || 'An error occurred');
+      
+      let errorMessage = 'An unknown error occurred';
+      
+      if (err.name === 'AbortError') {
+        errorMessage = 'Request timed out. The server took too long to respond. Please try again.';
+      } else if (err.message) {
+        errorMessage = err.message;
+        // Add additional context if it's a fetch error
+        if (err.message === 'Failed to fetch' || err.message.includes('fetch failed')) {
+          errorMessage = 'Network error: Could not connect to the server. Please check your internet connection and try again.';
+        }
+      }
+      
+      setError(errorMessage);
       setIsLoading(false);
     }
   };
