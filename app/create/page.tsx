@@ -22,7 +22,7 @@ export default function CreateGame() {
       console.log('Submitting create room request with host name:', hostName);
       
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 20000); // Increase timeout to 20 seconds
       
       const response = await fetch('/api/rooms', {
         method: 'POST',
@@ -113,9 +113,15 @@ export default function CreateGame() {
         errorMessage = 'Request timed out. The server took too long to respond. Please try again.';
       } else if (err.message) {
         errorMessage = err.message;
+        
         // Add additional context if it's a fetch error
         if (err.message === 'Failed to fetch' || err.message.includes('fetch failed')) {
           errorMessage = 'Network error: Could not connect to the server. Please check your internet connection and try again.';
+        } else if (err.message.includes('Database configuration error')) {
+          errorMessage = 'Database configuration error: The game server is not properly configured. Please contact the game administrator.';
+        } else if (err.message.includes('Network error')) {
+          // This is from our improved server-side error handling
+          errorMessage = err.message + '\n\nTroubleshooting tips:\n1. Check your internet connection\n2. Try again in a few moments\n3. If the problem persists, the database server might be down';
         }
       }
       

@@ -38,6 +38,20 @@ export async function createRoom(hostName: string): Promise<{
   player: Pick<Player, 'id' | 'name'>
 } | null> {
   try {
+    // Verify Supabase URL and API key are set
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || supabaseUrl.includes('example.supabase.co')) {
+      console.error('Supabase URL is not configured correctly');
+      throw new Error('Database configuration error: Supabase URL is not set correctly');
+    }
+    
+    if (!supabaseKey || supabaseKey.includes('placeholder')) {
+      console.error('Supabase API key is not configured correctly');
+      throw new Error('Database configuration error: Supabase API key is not set correctly');
+    }
+    
     // Try to create room with retry for code collisions
     let attempts = 0;
     const maxAttempts = 5;
@@ -57,95 +71,128 @@ export async function createRoom(hostName: string): Promise<{
       console.log(`Creating room with code: ${roomCode} (attempt ${attempts}/${maxAttempts})`);
       
       // Step 1: Check if code already exists
-      const { data: existingRoom, error: checkError } = await supabase
-        .from('rooms')
-        .select('code')
-        .eq('code', roomCode)
-        .maybeSingle();
+      try {
+        const { data: existingRoom, error: checkError } = await supabase
+          .from('rooms')
+          .select('code')
+          .eq('code', roomCode)
+          .maybeSingle();
+          
+        if (checkError) {
+          console.error('Error checking for existing room:', checkError);
+          throw new Error(`Database connection error: ${checkError.message}`);
+        }
         
-      if (existingRoom) {
-        console.log(`Room code ${roomCode} already exists, trying again...`);
-        continue; // Try again with a new code
+        if (existingRoom) {
+          console.log(`Room code ${roomCode} already exists, trying again...`);
+          continue; // Try again with a new code
+        }
+      } catch (connError: any) {
+        console.error('Connection error checking for existing room:', connError);
+        if (connError.message?.includes('fetch failed') || connError.message?.includes('network')) {
+          throw new Error('Network error: Cannot connect to the database. Please check your internet connection and try again.');
+        }
+        throw connError;
       }
       
       // Step 2: Create the game room
-      const { data: roomData, error: roomError } = await supabase
-        .from('rooms')
-        .insert([
-          { 
-            code: roomCode,
-            round_number: 0,
-            is_active: true
+      try {
+        const { data: roomData, error: roomError } = await supabase
+          .from('rooms')
+          .insert([
+            { 
+              code: roomCode,
+              round_number: 0,
+              is_active: true
+            }
+          ])
+          .select()
+          .single();
+        
+        if (roomError) {
+          // If it's a duplicate key error, try again
+          if (roomError.code === '23505' && roomError.message?.includes('rooms_code_key')) {
+            console.log(`Duplicate room code conflict: ${roomCode}, trying again...`);
+            continue; // Try again with a new code
           }
-        ])
-        .select()
-        .single();
-      
-      if (roomError) {
-        // If it's a duplicate key error, try again
-        if (roomError.code === '23505' && roomError.message?.includes('rooms_code_key')) {
-          console.log(`Duplicate room code conflict: ${roomCode}, trying again...`);
-          continue; // Try again with a new code
+          
+          // Otherwise, it's a different error
+          const errorMessage = roomError.message || JSON.stringify(roomError);
+          console.error('Error creating room - Details:', {
+            error: roomError,
+            errorMessage,
+            errorCode: roomError.code,
+            details: roomError.details,
+            hint: roomError.hint
+          });
+          throw new Error(`Failed to create game room: ${errorMessage || 'Unknown database error'}`);
         }
         
-        // Otherwise, it's a different error
-        const errorMessage = roomError.message || JSON.stringify(roomError);
-        console.error('Error creating room - Details:', {
-          error: roomError,
-          errorMessage,
-          errorCode: roomError.code,
-          details: roomError.details,
-          hint: roomError.hint
-        });
-        throw new Error(`Failed to create game room: ${errorMessage || 'Unknown database error'}`);
-      }
-      
-      if (!roomData) {
-        console.error('No room data returned but no error either');
-        throw new Error('Failed to create game room: No data returned');
-      }
-      
-      console.log('Room created successfully, ID:', roomData.id);
-      
-      // Step 3: Create the host player 
-      const { data: playerData, error: playerError } = await supabase
-        .from('players')
-        .insert([
-          { 
-            name: hostName,
-            room_id: roomData.id,
-            is_imposter: false
-          }
-        ])
-        .select()
-        .single();
-      
-      if (playerError) {
-        console.error('Error creating host player:', playerError);
-        // Attempt to rollback room creation
-        await supabase.from('rooms').delete().eq('id', roomData.id);
-        throw new Error(`Failed to create host player: ${playerError.message || JSON.stringify(playerError)}`);
-      }
-      
-      if (!playerData) {
-        console.error('No player data returned but no error either');
-        // Attempt to rollback room creation
-        await supabase.from('rooms').delete().eq('id', roomData.id);
-        throw new Error('Failed to create host player: No data returned');
-      }
-      
-      console.log('Player created successfully, ID:', playerData.id);
-      
-      return {
-        room: {
-          id: roomData.id,
-          code: roomData.code,
-        },
-        player: {
-          id: playerData.id,
-          name: playerData.name
+        if (!roomData) {
+          console.error('No room data returned but no error either');
+          throw new Error('Failed to create game room: No data returned');
         }
-      };
+        
+        console.log('Room created successfully, ID:', roomData.id);
+        
+        // Step 3: Create the host player 
+        try {
+          const { data: playerData, error: playerError } = await supabase
+            .from('players')
+            .insert([
+              { 
+                name: hostName,
+                room_id: roomData.id,
+                is_imposter: false
+              }
+            ])
+            .select()
+            .single();
+          
+          if (playerError) {
+            console.error('Error creating host player:', playerError);
+            // Attempt to rollback room creation
+            await supabase.from('rooms').delete().eq('id', roomData.id);
+            throw new Error(`Failed to create host player: ${playerError.message || JSON.stringify(playerError)}`);
+          }
+          
+          if (!playerData) {
+            console.error('No player data returned but no error either');
+            // Attempt to rollback room creation
+            await supabase.from('rooms').delete().eq('id', roomData.id);
+            throw new Error('Failed to create host player: No data returned');
+          }
+          
+          console.log('Player created successfully, ID:', playerData.id);
+          
+          return {
+            room: {
+              id: roomData.id,
+              code: roomData.code,
+            },
+            player: {
+              id: playerData.id,
+              name: playerData.name
+            }
+          };
+        } catch (playerCreationError: any) {
+          console.error('Error in player creation:', playerCreationError);
+          // Attempt to rollback room creation
+          await supabase.from('rooms').delete().eq('id', roomData.id);
+          
+          if (playerCreationError.message?.includes('fetch failed') || playerCreationError.message?.includes('network')) {
+            throw new Error('Network error: Lost connection to the database while creating player. Please try again.');
+          }
+          throw playerCreationError;
+        }
+      } catch (roomCreationError: any) {
+        console.error('Error in room creation:', roomCreationError);
+        
+        if (roomCreationError.message?.includes('fetch failed') || roomCreationError.message?.includes('network')) {
+          throw new Error('Network error: Lost connection to the database while creating room. Please try again.');
+        }
+        throw roomCreationError;
+      }
     }
     
     // If we get here, we've exceeded max attempts

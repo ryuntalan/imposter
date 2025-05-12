@@ -34,3 +34,41 @@ This project is configured to ignore ESLint and TypeScript errors during build t
 - A custom build command is configured in `package.json`
 
 After configuring the environment variables, your deployment should complete successfully. 
+
+## Troubleshooting Connection Issues
+
+If you encounter network errors or connection problems after deployment, follow these steps:
+
+### Common Issues and Solutions
+
+1. **"Network error: Could not connect to the server"**
+   - Check that all three Supabase environment variables are correctly set in Vercel
+   - Verify that your Supabase project is active and not paused
+   - Test the Supabase connection via the diagnostic endpoint: `/api/debug/supabase-test` (enable by setting `ENABLE_DEBUG_ENDPOINTS=true` in dev/test environments)
+
+2. **"Database configuration error"**
+   - This means the Supabase URL or API keys are not properly set or are using placeholder values
+   - Double-check the values in your Vercel project settings and ensure they match your Supabase project
+
+3. **Request timeouts**
+   - The application is configured with a 20-second timeout for API requests
+   - If you consistently experience timeouts, check if your Supabase project is experiencing high load or needs to be upgraded to a higher tier
+
+### Testing the Connection
+
+To diagnose connection issues:
+
+1. Set `ENABLE_DEBUG_ENDPOINTS=true` in your Vercel environment variables
+2. Access `/api/debug/supabase-test` in your browser
+3. Review the connection test results for both client and server connections
+4. If only server connections fail, check your `SUPABASE_SERVICE_ROLE_KEY`
+5. If only client connections fail, check your `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+
+### Still Having Issues?
+
+If you continue to experience connection problems:
+
+1. Check Supabase Status: https://status.supabase.com/
+2. Verify that the IP used by your Vercel deployment isn't blocked by any Supabase firewall rules
+3. Try recreating your API keys in the Supabase dashboard
+4. Test the connection from a different environment to isolate network or configuration issues 
